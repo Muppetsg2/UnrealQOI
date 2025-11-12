@@ -9,10 +9,10 @@ QOI Format Import/Export plugin for Unreal Engine 5
 ## Usage
 
 ### Import
-Drag & Drop `.qoi` file to content panel or open import dialog and select **Quiet Ok Image Format(*.qoi)** files.
+Drag & Drop `.qoi` file to content panel or open import dialog and select **Quite OK Image Format(*.qoi)** files.
 
 ### Export
-Right-click a `Texture2D` asset, choose **Asset Actions->Export...**, select **Quiet Ok Image Format(*.qoi)** as the export format, and save your image.
+Right-click a `Texture2D` asset, choose **Asset Actions->Export...**, select **Quite OK Image Format(*.qoi)** as the export format, and save your image.
 
 ## Installation
 Clone the plugin into your Unreal project:
