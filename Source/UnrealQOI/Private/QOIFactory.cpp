@@ -14,7 +14,7 @@ UQOIFactory::UQOIFactory()
 {
     bEditorImport = true;
     bCreateNew = false;
-    Formats.Add(TEXT("qoi;Quiet Ok Image Format"));
+    Formats.Add(TEXT("qoi;Quite OK Image Format"));
     SupportedClass = UTexture2D::StaticClass();
 }
 
@@ -31,7 +31,7 @@ UObject* UQOIFactory::FactoryCreateFile(UClass* InClass, UObject* InParent, FNam
     TArray<uint8> RawRGBA;
     if (!DecodeQOIFormat(Filename, RawRGBA, Width, Height))
     {
-        UE_LOG(LogQOIFactory, Error, TEXT("Failed to decode qoi texture: %s"), *Filename);
+        UE_LOG(LogQOIFactory, Error, TEXT("Failed to decode QOI texture: %s"), *Filename);
         return nullptr;
     }
 
