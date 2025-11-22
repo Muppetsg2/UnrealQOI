@@ -1,3 +1,5 @@
+![QOI Logo](https://qoiformat.org/qoi-logo.svg)
+
 # UnrealQOI
 Import and Export [QOI](https://qoiformat.org/) `.qoi` format file in [Unreal Engine 5](https://www.unrealengine.com/).
 
@@ -16,7 +18,6 @@ Right-click a `Texture2D` asset, choose **Asset Actions->Export...**, select **Q
 
 ## Installation
 Clone the plugin into your Unreal project:
-
 ```sh
 cd {YourUnrealProject}
 git clone https://github.com/Muppetsg2/UnrealQOI.git ./Plugins/UnrealQOI
@@ -28,6 +29,8 @@ Or add it as a submodule:
 cd {YourUnrealProject}
 git submodule add https://github.com/Muppetsg2/UnrealQOI.git ./Plugins/UnrealQOI
 ```
+Alternatively, you can download the precompiled binary from the plugin [release page](https://github.com/Muppetsg2/UnrealQOI/releases/latest) and copy it directly into the same `Plugins/UnrealQOI` folder.
+
 If you are creating a package without C++ access, copy the plugin to the `Engine/Plugins/Runtime` directory.
 
 ## Debugging
