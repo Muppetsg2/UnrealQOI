@@ -8,6 +8,10 @@
 #include <Misc/FileHelper.h>
 #include <Serialization/BufferArchive.h>
 #include <Logging/LogMacros.h>
+
+#define KOI_IMAGE_WRITE_IMPLEMENTATION
+#define KOI_WRITE_ONLY_QOI
+#define KOI_WRITE_NO_STDIO
 #include "koi/koi_image_write.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogQOIExporter, Log, All);

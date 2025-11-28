@@ -6,6 +6,11 @@
 #include <Engine/Texture2D.h>
 #include <Misc/FileHelper.h>
 #include <Logging/LogMacros.h>
+
+#define KOI_IMAGE_IMPLEMENTATION
+#define KOI_ONLY_QOI
+#define KOI_NO_STDIO
+#define KOI_NO_LINEAR
 #include "koi/koi_image.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogQOIFactory, Log, All);
