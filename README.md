@@ -1,4 +1,4 @@
-![QOI Logo](https://qoiformat.org/qoi-logo.svg)
+![QOI Logo](https://github.com/Muppetsg2/UnrealQOI/blob/main/.github/unreal-qoi.svg)
 
 # UnrealQOI
 Import, export, load and save [QOI](https://qoiformat.org/) (`.qoi`) images in [Unreal Engine 5](https://www.unrealengine.com/), in the editor and at runtime, from C++ and Blueprints.
