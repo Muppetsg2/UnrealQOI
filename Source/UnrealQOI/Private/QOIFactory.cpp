@@ -2,102 +2,182 @@
 // Licensed under the MIT License.
 
 #include "QOIFactory.h"
-#include "UnrealQOI.h"
-#include <Engine/Texture2D.h>
-#include <Misc/FileHelper.h>
-#include <Logging/LogMacros.h>
 
-#define KOI_IMAGE_IMPLEMENTATION
-#define KOI_ONLY_QOI
-#define KOI_NO_STDIO
-#define KOI_NO_LINEAR
-#include "koi/koi_image.h"
+#include "QOICodec.h"
+#include "UnrealQOILog.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogQOIFactory, Log, All);
+#include "Editor.h"
+#include "EditorFramework/AssetImportData.h"
+#include "Engine/Texture2D.h"
+#include "Misc/FeedbackContext.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Subsystems/ImportSubsystem.h"
+
+namespace UnrealQOI::Private
+{
+	bool IsQOIFilename(const FString& Filename)
+	{
+		return FPaths::GetExtension(Filename).Equals(TEXT("qoi"), ESearchCase::IgnoreCase);
+	}
+
+	/** Replaces the texture's source pixels. Must be called between PreEditChange and PostEditChange. */
+	void SetTextureSource(UTexture2D& Texture, const FQOIImage& Image)
+	{
+		Texture.Source.Init(Image.Width, Image.Height, /*NewNumSlices*/ 1, /*NewNumMips*/ 1, TSF_BGRA8, Image.BGRA.GetData());
+	}
+}
 
 UQOIFactory::UQOIFactory()
 {
-    bEditorImport = true;
-    bCreateNew = false;
-    Formats.Add(TEXT("qoi;Quite OK Image Format"));
-    SupportedClass = UTexture2D::StaticClass();
+	SupportedClass = UTexture2D::StaticClass();
+	Formats.Add(TEXT("qoi;Quite OK Image Format"));
+
+	bCreateNew = false;
+	bEditorImport = true;
+	bText = false;
+
+	// The engine's texture reimport handler accepts any texture, regardless of the source file type.
+	// A higher priority makes sure .qoi textures are reimported by this factory.
+	ImportPriority = DefaultImportPriority + 1;
 }
 
 bool UQOIFactory::FactoryCanImport(const FString& Filename)
 {
-    return FPaths::GetExtension(Filename).Equals(TEXT("qoi"), ESearchCase::IgnoreCase);
+	return UnrealQOI::Private::IsQOIFilename(Filename);
 }
 
-UObject* UQOIFactory::FactoryCreateFile(UClass* InClass, UObject* InParent, FName InName, EObjectFlags Flags, const FString& Filename, const TCHAR* Parms, FFeedbackContext* Warn, bool& bOutOperationCanceled)
+UObject* UQOIFactory::FactoryCreateBinary(UClass* InClass, UObject* InParent, FName InName, EObjectFlags Flags, UObject* Context, const TCHAR* Type, const uint8*& Buffer, const uint8* BufferEnd, FFeedbackContext* Warn)
 {
-    bOutOperationCanceled = false;
+	UImportSubsystem* ImportSubsystem = GEditor ? GEditor->GetEditorSubsystem<UImportSubsystem>() : nullptr;
+	if (ImportSubsystem)
+	{
+		ImportSubsystem->BroadcastAssetPreImport(this, InClass, InParent, InName, Type);
+	}
 
-    int32 Width = 0, Height = 0;
-    TArray<uint8> RawRGBA;
-    if (!DecodeQOIFormat(Filename, RawRGBA, Width, Height))
-    {
-        UE_LOG(LogQOIFactory, Error, TEXT("Failed to decode QOI texture: %s"), *Filename);
-        return nullptr;
-    }
+	auto Fail = [&](const FString& Message) -> UObject*
+	{
+		Warn->Logf(ELogVerbosity::Error, TEXT("QOI import of '%s' failed: %s"), *InName.ToString(), *Message);
+		if (ImportSubsystem)
+		{
+			ImportSubsystem->BroadcastAssetPostImport(this, nullptr);
+		}
+		return nullptr;
+	};
 
-    if (RawRGBA.Num() != Width * Height * 4)
-    {
-        UE_LOG(LogQOIFactory, Error, TEXT("Decoded data size doesn't match width * height * 4"));
-        return nullptr;
-    }
+	UnrealQOI::FQOIImage Image;
+	FString Error;
+	if (!UnrealQOI::Decode(Buffer, BufferEnd - Buffer, Image, Error))
+	{
+		return Fail(Error);
+	}
 
-    UTexture2D* NewTexture = NewObject<UTexture2D>(InParent, InName, Flags);
-    if (!NewTexture) {
-        UE_LOG(LogQOIFactory, Error, TEXT("Failed to create texture object"));
-        return nullptr;
-    }
+	// When importing over an existing texture, reuse it so that its settings
+	// (compression, LOD group, sRGB, ...) and all references to it are kept.
+	UTexture2D* Texture = FindObject<UTexture2D>(InParent, *InName.ToString());
+	const bool bIsNewTexture = Texture == nullptr;
+	if (bIsNewTexture)
+	{
+		Texture = Cast<UTexture2D>(CreateOrOverwriteAsset(UTexture2D::StaticClass(), InParent, InName, Flags));
+		if (Texture == nullptr)
+		{
+			return Fail(TEXT("Could not create the texture asset."));
+		}
+	}
+	else
+	{
+		Texture->PreEditChange(nullptr);
+	}
 
-    // Conversion RGBA → BGRA (Unreal expects BGRA for TSF_BGRA8)
-    for (int32 i = 0; i < RawRGBA.Num(); i += 4)
-    {
-        uint8 R = RawRGBA[i];
-        RawRGBA[i] = RawRGBA[i + 2];     // B
-        RawRGBA[i + 2] = R;              // R
-    }
+	UnrealQOI::Private::SetTextureSource(*Texture, Image);
 
-    NewTexture->Source.Init(Width, Height, 1, 1, TSF_BGRA8, RawRGBA.GetData());
-    NewTexture->SRGB = true;
-    NewTexture->CompressionSettings = TC_Default;
-    NewTexture->MipGenSettings = TMGS_FromTextureGroup;
-    NewTexture->UpdateResource();
-    NewTexture->MarkPackageDirty();
-    return NewTexture;
+	if (bIsNewTexture)
+	{
+		// Colorspace 1 in the QOI header means the pixels are linear data (masks, normal maps, ...).
+		Texture->SRGB = !Image.bLinear;
+		// The header says the image was saved without alpha.
+		Texture->CompressionNoAlpha = Image.Channels == 3;
+	}
+
+	if (Texture->AssetImportData)
+	{
+		Texture->AssetImportData->Update(CurrentFilename);
+	}
+
+	// Rebuilds the platform data and the render resource.
+	Texture->PostEditChange();
+
+	if (ImportSubsystem)
+	{
+		ImportSubsystem->BroadcastAssetPostImport(this, Texture);
+	}
+
+	return Texture;
 }
 
-bool UQOIFactory::DecodeQOIFormat(const FString& Filename, TArray<uint8>& OutRawRGBA, int32& OutWidth, int32& OutHeight)
+bool UQOIFactory::CanReimport(UObject* Obj, TArray<FString>& OutFilenames)
 {
-    TArray<uint8> FileData;
-    if (!FFileHelper::LoadFileToArray(FileData, *Filename))
-    {
-        UE_LOG(LogQOIFactory, Error, TEXT("Cannot read file %s"), *Filename);
-        return false;
-    }
+	const UTexture2D* Texture = Cast<UTexture2D>(Obj);
+	if (Texture != nullptr && Texture->AssetImportData != nullptr
+		&& UnrealQOI::Private::IsQOIFilename(Texture->AssetImportData->GetFirstFilename()))
+	{
+		Texture->AssetImportData->ExtractFilenames(OutFilenames);
+		return true;
+	}
+	return false;
+}
 
-    // Check QOI validity
-    if (koi_info_from_memory(FileData.GetData(), FileData.Num(), nullptr, nullptr, nullptr) == 0) {
-        UE_LOG(LogQOIFactory, Error, TEXT("File %s is not a valid QOI image"), *Filename);
-        return false;
-    }
+void UQOIFactory::SetReimportPaths(UObject* Obj, const TArray<FString>& NewReimportPaths)
+{
+	UTexture2D* Texture = Cast<UTexture2D>(Obj);
+	if (Texture != nullptr && Texture->AssetImportData != nullptr && ensure(NewReimportPaths.Num() == 1))
+	{
+		Texture->AssetImportData->UpdateFilenameOnly(NewReimportPaths[0]);
+	}
+}
 
-    // Decode QOI data
-    int Comp;
-    unsigned char* ImgData = koi_load_from_memory(FileData.GetData(), FileData.Num(), &OutWidth, &OutHeight, &Comp, 4);
-    if (!ImgData) {
-        UE_LOG(LogQOIFactory, Error, TEXT("Failed decode file %s : %s"), *Filename, *FString(koi_failure_reason()));
-        return false;
-    }
+EReimportResult::Type UQOIFactory::Reimport(UObject* Obj)
+{
+	UTexture2D* Texture = Cast<UTexture2D>(Obj);
+	if (Texture == nullptr || Texture->AssetImportData == nullptr)
+	{
+		return EReimportResult::Failed;
+	}
 
-    // Copy decoded data to output array
-    int32 DataSize = OutWidth * OutHeight * 4;
-    OutRawRGBA.SetNum(DataSize);
-    FMemory::Memcpy(OutRawRGBA.GetData(), ImgData, DataSize);
+	const FString Filename = Texture->AssetImportData->GetFirstFilename();
+	if (Filename.IsEmpty() || !FPaths::FileExists(Filename))
+	{
+		UE_LOG(LogUnrealQOI, Warning, TEXT("Cannot reimport '%s': source file '%s' does not exist."), *Texture->GetPathName(), *Filename);
+		return EReimportResult::Failed;
+	}
 
-    // Free decoded image data
-    koi_image_free(ImgData);
-    return true;
+	TArray64<uint8> FileData;
+	if (!FFileHelper::LoadFileToArray(FileData, *Filename))
+	{
+		UE_LOG(LogUnrealQOI, Error, TEXT("Cannot reimport '%s': failed to read '%s'."), *Texture->GetPathName(), *Filename);
+		return EReimportResult::Failed;
+	}
+
+	UnrealQOI::FQOIImage Image;
+	FString Error;
+	if (!UnrealQOI::Decode(FileData.GetData(), FileData.Num(), Image, Error))
+	{
+		UE_LOG(LogUnrealQOI, Error, TEXT("Cannot reimport '%s' from '%s': %s"), *Texture->GetPathName(), *Filename, *Error);
+		return EReimportResult::Failed;
+	}
+
+	// Only the pixels are replaced; the texture settings chosen by the user stay as they are.
+	Texture->PreEditChange(nullptr);
+	UnrealQOI::Private::SetTextureSource(*Texture, Image);
+	Texture->AssetImportData->Update(Filename);
+	Texture->PostEditChange();
+	Texture->MarkPackageDirty();
+
+	UE_LOG(LogUnrealQOI, Log, TEXT("Reimported '%s' from '%s'."), *Texture->GetPathName(), *Filename);
+	return EReimportResult::Succeeded;
+}
+
+int32 UQOIFactory::GetPriority() const
+{
+	return ImportPriority;
 }

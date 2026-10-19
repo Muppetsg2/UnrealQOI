@@ -1,24 +1,29 @@
 {
 	"FileVersion": 3,
-	"Version": 3,
-	"VersionName": "1.0.2",
+	"Version": 4,
+	"VersionName": "1.0.4",
 	"FriendlyName": "UnrealQOI",
-	"Description": "QOI Format Import/Export plugin",
+	"Description": "Import and export textures in the QOI (Quite OK Image) format.",
 	"Category": "Importers",
 	"CreatedBy": "Muppetsg2",
 	"CreatedByURL": "https://github.com/Muppetsg2",
 	"DocsURL": "https://github.com/Muppetsg2/UnrealQOI/blob/main/README.md",
-	"MarketplaceURL": "",
-	"SupportURL": "https://github.com/Muppetsg2/UnrealQOI",
+	"SupportURL": "https://github.com/Muppetsg2/UnrealQOI/issues",
 	"CanContainContent": false,
 	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
 	"Installed": false,
 	"EnabledByDefault": true,
 	"Modules": [
 		{
 			"Name": "UnrealQOI",
 			"Type": "Editor",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64",
+				"Mac",
+				"Linux"
+			]
 		}
 	]
 }

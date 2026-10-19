@@ -2,160 +2,167 @@
 // Licensed under the MIT License.
 
 #include "QOIExporter.h"
-#include <Engine/Texture.h>
-#include <Engine/Texture2D.h>
-#include <Engine/TextureDefines.h>
-#include <Misc/FileHelper.h>
-#include <Serialization/BufferArchive.h>
-#include <Logging/LogMacros.h>
 
-#define KOI_IMAGE_WRITE_IMPLEMENTATION
-#define KOI_WRITE_ONLY_QOI
-#define KOI_WRITE_NO_STDIO
-#include "koi/koi_image_write.h"
+#include "QOICodec.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogQOIExporter, Log, All);
+#include "Engine/Texture2D.h"
+#include "ImageCore.h"
+#include "Misc/EngineVersionComparison.h"
+#include "Misc/FeedbackContext.h"
+#include "Serialization/Archive.h"
+
+// FTextureSource::GetMipImage (which handles every source format and its gamma
+// space) is used on newer engines; older ones read the raw mip and describe it manually.
+#define UNREALQOI_USE_GETMIPIMAGE !UE_VERSION_OLDER_THAN(5, 2, 0)
+
+namespace UnrealQOI::Private
+{
+	/** Reads mip 0 of the first block/layer of the texture's source data. */
+	bool ReadSourceImage(UTexture2D& Texture, FImage& OutImage, FString& OutError)
+	{
+		FTextureSource& Source = Texture.Source;
+		if (!Source.IsValid())
+		{
+			OutError = TEXT("The texture has no source data.");
+			return false;
+		}
+
+#if UNREALQOI_USE_GETMIPIMAGE
+		if (!Source.GetMipImage(OutImage, /*BlockIndex*/ 0, /*LayerIndex*/ 0, /*MipIndex*/ 0))
+		{
+			OutError = TEXT("Could not read the source data.");
+			return false;
+		}
+		return true;
+#else
+		ERawImageFormat::Type RawFormat;
+		EGammaSpace GammaSpace = EGammaSpace::Linear;
+		switch (Source.GetFormat())
+		{
+		case TSF_G8:
+			RawFormat = ERawImageFormat::G8;
+			GammaSpace = Texture.SRGB ? EGammaSpace::sRGB : EGammaSpace::Linear;
+			break;
+		case TSF_BGRA8:
+			RawFormat = ERawImageFormat::BGRA8;
+			GammaSpace = Texture.SRGB ? EGammaSpace::sRGB : EGammaSpace::Linear;
+			break;
+		case TSF_BGRE8:
+			RawFormat = ERawImageFormat::BGRE8;
+			break;
+		case TSF_G16:
+			RawFormat = ERawImageFormat::G16;
+			break;
+		case TSF_RGBA16:
+			RawFormat = ERawImageFormat::RGBA16;
+			break;
+		case TSF_RGBA16F:
+			RawFormat = ERawImageFormat::RGBA16F;
+			break;
+		default:
+			OutError = FString::Printf(TEXT("Source format %d is not supported on this engine version."), static_cast<int32>(Source.GetFormat()));
+			return false;
+		}
+
+		TArray64<uint8> MipData;
+		if (!Source.GetMipData(MipData, /*MipIndex*/ 0))
+		{
+			OutError = TEXT("Could not read the source data.");
+			return false;
+		}
+
+		OutImage.Init(static_cast<int32>(Source.GetSizeX()), static_cast<int32>(Source.GetSizeY()), RawFormat, GammaSpace);
+		if (MipData.Num() < OutImage.RawData.Num())
+		{
+			OutError = FString::Printf(TEXT("Source data is %lld bytes, expected %lld."), MipData.Num(), OutImage.RawData.Num());
+			return false;
+		}
+		FMemory::Memcpy(OutImage.RawData.GetData(), MipData.GetData(), OutImage.RawData.Num());
+		return true;
+#endif
+	}
+
+	bool IsHDRFormat(ERawImageFormat::Type Format)
+	{
+		switch (Format)
+		{
+		case ERawImageFormat::BGRE8:
+		case ERawImageFormat::RGBA16F:
+		case ERawImageFormat::RGBA32F:
+#if UNREALQOI_USE_GETMIPIMAGE
+		case ERawImageFormat::R16F:
+		case ERawImageFormat::R32F:
+#endif
+			return true;
+		default:
+			return false;
+		}
+	}
+}
 
 UQOIExporter::UQOIExporter()
 {
-    bText = false;
-    FormatExtension.Add(FString(TEXT("qoi")));
-    FormatDescription.Add(FString(TEXT("Quiet Ok Image Format")));
-    SupportedClass = UTexture2D::StaticClass();
+	SupportedClass = UTexture2D::StaticClass();
+	FormatExtension.Add(TEXT("QOI"));
+	FormatDescription.Add(TEXT("Quite OK Image Format"));
+	PreferredFormatIndex = 0;
+	bText = false;
+}
+
+bool UQOIExporter::SupportsObject(UObject* Object) const
+{
+	UTexture2D* Texture = Cast<UTexture2D>(Object);
+	return Texture != nullptr && Texture->Source.IsValid();
 }
 
 bool UQOIExporter::ExportBinary(UObject* Object, const TCHAR* Type, FArchive& Ar, FFeedbackContext* Warn, int32 FileIndex, uint32 PortFlags)
 {
-    UTexture2D* Texture = Cast<UTexture2D>(Object);
-    if (!Texture) {
-        UE_LOG(LogQOIExporter, Error, TEXT("ExportBinary called with non-texture object"));
-        return false;
-    }
+	UTexture2D* Texture = Cast<UTexture2D>(Object);
+	if (Texture == nullptr)
+	{
+		Warn->Logf(ELogVerbosity::Error, TEXT("QOI export: '%s' is not a Texture2D."), *GetNameSafe(Object));
+		return false;
+	}
 
-    TArray<uint8> OutData;
-    if (!EncodeQOIFormat(Texture, OutData))
-    {
-        UE_LOG(LogQOIExporter, Error, TEXT("Failed to encode texture %s"), *Texture->GetName());
-        return false;
-    }
+	FImage SourceImage;
+	FString Error;
+	if (!UnrealQOI::Private::ReadSourceImage(*Texture, SourceImage, Error))
+	{
+		Warn->Logf(ELogVerbosity::Error, TEXT("QOI export of '%s' failed: %s"), *Texture->GetName(), *Error);
+		return false;
+	}
 
-    Ar.Serialize(OutData.GetData(), OutData.Num());
-    return true;
-}
+	if (Texture->Source.GetNumBlocks() > 1 || Texture->Source.GetNumSlices() > 1 || Texture->Source.GetNumLayers() > 1)
+	{
+		Warn->Logf(ELogVerbosity::Warning, TEXT("QOI export of '%s': the texture has several source blocks, slices or layers; only the first one is exported."), *Texture->GetName());
+	}
 
-bool UQOIExporter::ConvertTextureDataToRGBA8(const ETextureSourceFormat& Format, TArray<uint8, FDefaultAllocator64>& RawData, TArray<uint8>& OutRGBA) 
-{
-    auto FloatToByteColor = [](float v) -> uint8
-    {
-        v = FMath::Clamp(v, 0.0f, 1.0f);
-        return static_cast<uint8>(v * 255.0f + 0.5f);
-    };
+	// QOI stores 8 bits per channel. Low dynamic range data keeps the gamma space of the texture,
+	// so linear data (masks, normal maps) round-trips unchanged and is flagged as linear in the header.
+	// High dynamic range data is clamped to [0, 1] and stored as sRGB, like the engine's PNG export.
+	const bool bIsHDR = UnrealQOI::Private::IsHDRFormat(SourceImage.Format);
+	const bool bStoreLinear = !Texture->SRGB && !bIsHDR;
+	if (bIsHDR)
+	{
+		Warn->Logf(ELogVerbosity::Warning, TEXT("QOI export of '%s': HDR source data is clamped to 8-bit sRGB."), *Texture->GetName());
+	}
 
-    int32 PixelCount = RawData.Num();
-    switch (Format)
-    {
-        case TSF_G8:
-        {
-            OutRGBA.SetNumUninitialized(PixelCount * 4);
-            for (int32 i = 0; i < PixelCount; ++i)
-            {
-                const int32 s = i * 4;
-                uint8 Gray = RawData[i];
-                OutRGBA[s + 0] = Gray; // R
-                OutRGBA[s + 1] = Gray; // G
-                OutRGBA[s + 2] = Gray; // B
-                OutRGBA[s + 3] = 255;  // A
-            }
-            break;
-        }
-        case TSF_BGRA8:
-        {
-            OutRGBA.SetNumUninitialized(PixelCount);
-            for (int32 i = 0; i < PixelCount; i += 4)
-            {
-                OutRGBA[i + 0] = RawData[i + 2]; // R
-                OutRGBA[i + 1] = RawData[i + 1]; // G
-                OutRGBA[i + 2] = RawData[i + 0]; // B
-                OutRGBA[i + 3] = RawData[i + 3]; // A
-            }
-            break;
-        }
-        case TSF_BGRE8: 
-        {
-            OutRGBA.SetNumUninitialized(PixelCount);
-            // RGBE → RGBA (HDR to LDR conversion)
-            for (int32 i = 0; i < PixelCount; i += 4)
-            {
-                const int32 s = i * 4;
-                const float e = RawData[s + 3] - 128.0f; // exponent bias 128
-                const float scale = powf(2.0f, e);       // scale factor
+	FImage BGRAImage;
+	SourceImage.CopyTo(BGRAImage, ERawImageFormat::BGRA8, bStoreLinear ? EGammaSpace::Linear : EGammaSpace::sRGB);
 
-                float r = (RawData[s + 2] / 255.0f) * scale;
-                float g = (RawData[s + 1] / 255.0f) * scale;
-                float b = (RawData[s + 0] / 255.0f) * scale;
+	UnrealQOI::FQOIImage QOIImage;
+	QOIImage.Width = BGRAImage.SizeX;
+	QOIImage.Height = BGRAImage.SizeY;
+	QOIImage.bLinear = bStoreLinear;
+	QOIImage.BGRA = MoveTemp(BGRAImage.RawData);
 
-                // simple tone mapping (Reinhard)
-                r = r / (1.0f + r);
-                g = g / (1.0f + g);
-                b = b / (1.0f + b);
+	TArray64<uint8> Encoded;
+	if (!UnrealQOI::Encode(QOIImage, Encoded, Error))
+	{
+		Warn->Logf(ELogVerbosity::Error, TEXT("QOI export of '%s' failed: %s"), *Texture->GetName(), *Error);
+		return false;
+	}
 
-                OutRGBA[s + 0] = FloatToByteColor(r);
-                OutRGBA[s + 1] = FloatToByteColor(g);
-                OutRGBA[s + 2] = FloatToByteColor(b);
-                OutRGBA[s + 3] = 255;
-            }
-            break;
-        }
-        default:
-        {
-            UE_LOG(LogQOIExporter, Error, TEXT("Unsupported texture format %d"), static_cast<int32>(Format));
-            return false;
-        }
-    }
-
-    return true;
-}
-
-bool UQOIExporter::EncodeQOIFormat(UTexture2D* Texture, TArray<uint8>& OutData)
-{
-    // Get Texture Information
-    FTextureSource& Src = Texture->Source;
-    const int32 Width = Src.GetSizeX();
-    const int32 Height = Src.GetSizeY();
-
-    if (Src.GetSizeX() == 0 || Src.GetSizeY() == 0)
-    {
-        UE_LOG(LogQOIExporter, Error, TEXT("Texture %s has invalid dimensions"), *Texture->GetName());
-        return false;
-    }
-
-    // Get Raw Texture Data
-    TArray<uint8, FDefaultAllocator64> RawData;
-    Src.GetMipData(RawData, 0);
-
-    // Convert to RGBA8 if necessary
-    const ETextureSourceFormat Format = Src.GetFormat();
-    TArray<uint8> ConvertedData;
-    if (!ConvertTextureDataToRGBA8(Format, RawData, ConvertedData))
-    {
-        UE_LOG(LogQOIExporter, Error, TEXT("Unsupported texture format for texture %s"), *Texture->GetName());
-        return false;
-    }
-
-    // Encode to QOI format using koi library and write directly to archive
-    int res = koi_write_qoi_to_func(
-        [](void* context, void* data, int size)
-        {
-            TArray<uint8>* OutDataPtr = static_cast<TArray<uint8>*>(context);
-            OutDataPtr->Append(static_cast<uint8*>(data), size);
-        }, &OutData, Width, Height, 4, ConvertedData.GetData()
-    );
-
-    if (res == 0)
-    {
-        UE_LOG(LogQOIExporter, Error, TEXT("koi_write_qoi_to_func failed for texture %s"), *Texture->GetName());
-        return false;
-    }
-
-    return true;
+	Ar.Serialize(Encoded.GetData(), Encoded.Num());
+	return !Ar.IsError();
 }

@@ -7,44 +7,18 @@ public class UnrealQOI : ModuleRules
 {
 	public UnrealQOI(ReadOnlyTargetRules Target) : base(Target)
 	{
-		DefaultBuildSettings = BuildSettingsVersion.V2;
-		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
+		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		PublicIncludePaths.AddRange(
-			new string[]
-            {
-            }
-		);
-
-		PrivateIncludePaths.AddRange(
-			new string[] 
-			{
-			}
-		);
-
-		PublicDependencyModuleNames.AddRange(
+		// Everything is private: no other module needs to include the plugin's headers.
+		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
 				"Core",
 				"CoreUObject",
 				"Engine",
-				"InputCore"
-			}
-		);
-
-		PrivateDependencyModuleNames.AddRange(
-			new string[]
-			{
-				"Slate",
-				"SlateCore",
-				"AssetTools",
-				"UnrealEd"
-			}
-		);
-
-		DynamicallyLoadedModuleNames.AddRange(
-			new string[]
-			{
+				"ImageCore",
+				"UnrealEd",
+				"koi"
 			}
 		);
 	}
