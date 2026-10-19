@@ -2,10 +2,9 @@
 // Licensed under the MIT License.
 
 #include "Modules/ModuleManager.h"
-#include "UnrealQOILog.h"
+#include "UnrealQOI.h"
 
 DEFINE_LOG_CATEGORY(LogUnrealQOI);
 
-// The factory and exporter are discovered automatically through reflection,
-// so the module itself needs no startup or shutdown logic.
+// The runtime module only provides functions; it needs no startup or shutdown logic.
 IMPLEMENT_MODULE(FDefaultModuleImpl, UnrealQOI)

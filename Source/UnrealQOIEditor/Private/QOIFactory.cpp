@@ -3,18 +3,15 @@
 
 #include "QOIFactory.h"
 
-#include "QOICodec.h"
-#include "UnrealQOILog.h"
-
 #include "Editor.h"
 #include "EditorFramework/AssetImportData.h"
 #include "Engine/Texture2D.h"
 #include "Misc/FeedbackContext.h"
-#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Subsystems/ImportSubsystem.h"
+#include "UnrealQOI.h"
 
-namespace UnrealQOI::Private
+namespace UnrealQOIEditor::Private
 {
 	bool IsQOIFilename(const FString& Filename)
 	{
@@ -44,7 +41,7 @@ UQOIFactory::UQOIFactory()
 
 bool UQOIFactory::FactoryCanImport(const FString& Filename)
 {
-	return UnrealQOI::Private::IsQOIFilename(Filename);
+	return UnrealQOIEditor::Private::IsQOIFilename(Filename);
 }
 
 UObject* UQOIFactory::FactoryCreateBinary(UClass* InClass, UObject* InParent, FName InName, EObjectFlags Flags, UObject* Context, const TCHAR* Type, const uint8*& Buffer, const uint8* BufferEnd, FFeedbackContext* Warn)
@@ -65,9 +62,9 @@ UObject* UQOIFactory::FactoryCreateBinary(UClass* InClass, UObject* InParent, FN
 		return nullptr;
 	};
 
-	UnrealQOI::FQOIImage Image;
+	FQOIImage Image;
 	FString Error;
-	if (!UnrealQOI::Decode(Buffer, BufferEnd - Buffer, Image, Error))
+	if (!UnrealQOI::Decode(Buffer, BufferEnd - Buffer, Image, &Error))
 	{
 		return Fail(Error);
 	}
@@ -89,7 +86,7 @@ UObject* UQOIFactory::FactoryCreateBinary(UClass* InClass, UObject* InParent, FN
 		Texture->PreEditChange(nullptr);
 	}
 
-	UnrealQOI::Private::SetTextureSource(*Texture, Image);
+	UnrealQOIEditor::Private::SetTextureSource(*Texture, Image);
 
 	if (bIsNewTexture)
 	{
@@ -119,7 +116,7 @@ bool UQOIFactory::CanReimport(UObject* Obj, TArray<FString>& OutFilenames)
 {
 	const UTexture2D* Texture = Cast<UTexture2D>(Obj);
 	if (Texture != nullptr && Texture->AssetImportData != nullptr
-		&& UnrealQOI::Private::IsQOIFilename(Texture->AssetImportData->GetFirstFilename()))
+		&& UnrealQOIEditor::Private::IsQOIFilename(Texture->AssetImportData->GetFirstFilename()))
 	{
 		Texture->AssetImportData->ExtractFilenames(OutFilenames);
 		return true;
@@ -151,16 +148,9 @@ EReimportResult::Type UQOIFactory::Reimport(UObject* Obj)
 		return EReimportResult::Failed;
 	}
 
-	TArray64<uint8> FileData;
-	if (!FFileHelper::LoadFileToArray(FileData, *Filename))
-	{
-		UE_LOG(LogUnrealQOI, Error, TEXT("Cannot reimport '%s': failed to read '%s'."), *Texture->GetPathName(), *Filename);
-		return EReimportResult::Failed;
-	}
-
-	UnrealQOI::FQOIImage Image;
+	FQOIImage Image;
 	FString Error;
-	if (!UnrealQOI::Decode(FileData.GetData(), FileData.Num(), Image, Error))
+	if (!UnrealQOI::LoadFromFile(Filename, Image, &Error))
 	{
 		UE_LOG(LogUnrealQOI, Error, TEXT("Cannot reimport '%s' from '%s': %s"), *Texture->GetPathName(), *Filename, *Error);
 		return EReimportResult::Failed;
@@ -168,7 +158,7 @@ EReimportResult::Type UQOIFactory::Reimport(UObject* Obj)
 
 	// Only the pixels are replaced; the texture settings chosen by the user stay as they are.
 	Texture->PreEditChange(nullptr);
-	UnrealQOI::Private::SetTextureSource(*Texture, Image);
+	UnrealQOIEditor::Private::SetTextureSource(*Texture, Image);
 	Texture->AssetImportData->Update(Filename);
 	Texture->PostEditChange();
 	Texture->MarkPackageDirty();

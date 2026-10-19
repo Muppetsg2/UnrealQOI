@@ -1,9 +1,9 @@
 {
 	"FileVersion": 3,
 	"Version": 4,
-	"VersionName": "1.0.4",
+	"VersionName": "1.1.0",
 	"FriendlyName": "UnrealQOI",
-	"Description": "Import and export textures in the QOI (Quite OK Image) format.",
+	"Description": "Import, export, load and save images in the QOI (Quite OK Image) format, in the editor and at runtime (C++ and Blueprints).",
 	"Category": "Importers",
 	"CreatedBy": "Muppetsg2",
 	"CreatedByURL": "https://github.com/Muppetsg2",
@@ -17,13 +17,13 @@
 	"Modules": [
 		{
 			"Name": "UnrealQOI",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "UnrealQOIEditor",
 			"Type": "Editor",
-			"LoadingPhase": "Default",
-			"PlatformAllowList": [
-				"Win64",
-				"Mac",
-				"Linux"
-			]
+			"LoadingPhase": "Default"
 		}
 	]
 }

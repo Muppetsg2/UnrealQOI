@@ -3,21 +3,29 @@
 
 using UnrealBuildTool;
 
+// Runtime module: QOI encoding/decoding for C++ and Blueprints, in the editor and in packaged games.
 public class UnrealQOI : ModuleRules
 {
 	public UnrealQOI(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		// Everything is private: no other module needs to include the plugin's headers.
-		PrivateDependencyModuleNames.AddRange(
+		// Types used in the public headers.
+		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
 				"Core",
 				"CoreUObject",
-				"Engine",
+				"Engine"
+			}
+		);
+
+		PrivateDependencyModuleNames.AddRange(
+			new string[]
+			{
 				"ImageCore",
-				"UnrealEd",
+				"RenderCore",
+				"RHI",
 				"koi"
 			}
 		);

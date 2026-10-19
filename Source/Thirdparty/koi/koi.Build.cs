@@ -5,7 +5,7 @@ using System.IO;
 using UnrealBuildTool;
 
 // Header-only third-party library (https://github.com/Muppetsg2/koi).
-// The implementation is compiled once, in UnrealQOI/Private/QOICodec.cpp.
+// The implementation is compiled once, in UnrealQOI/Private/QOICodec.cpp (runtime module).
 public class koi : ModuleRules
 {
 	public koi(ReadOnlyTargetRules Target) : base(Target)
